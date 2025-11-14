@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Speech-to-Text Transcription</title>
+    <style>
+        /* --- existing styles unchanged --- */
+        body { font-family: Arial, sans-serif; background-color: #fafafa; margin:0; padding:40px; display:flex; flex-direction:column; align-items:center; }
+        h1 { color:#333; margin-bottom:20px; }
+        form { background:white; padding:20px 30px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.1); width:100%; max-width:500px; text-align:left; }
+        label { font-weight:bold; }
+        input[type="file"], select, button { margin-top:10px; width:100%; padding:10px; font-size:1rem; border-radius:5px; border:1px solid #ccc; }
+        button { background-color:#0078ff; color:white; border:none; cursor:pointer; transition:background 0.2s; }
+        button:hover { background-color:#005fcc; }
+
+        .result-box { margin-top:30px; width:100%; max-width:900px; display:none; flex-direction:column; position:relative; }
+        .result-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .textarea-container { position:relative; width:100%; }
+        textarea { width:100%; min-height:360px; resize:vertical; padding:18px 46px 18px 12px; font-size:1rem; border-radius:8px; border:1px solid #ccc; background:#fff; line-height:1.5; box-sizing:border-box; white-space:pre-wrap; overflow-wrap:break-word; }
+
+        .copy-icon-btn { position:absolute; top:10px; right:10px; width:32px; height:32px; border-radius:8px; border:0; background:rgba(0,0,0,0.06); display:flex; align-items:center; justify-content:center; cursor:pointer; transition: background 0.15s, transform 0.06s; padding:5px; }
+        .copy-icon-btn:hover { background:rgba(0,0,0,0.10); }
+        .copy-icon-btn:active { transform: translateY(1px); }
+        .copy-icon-btn svg { width:16px; height:16px; fill:#111827; }
+        .copy-tooltip { position:absolute; top:-30px; right:10px; background:#111827; color:white; padding:6px 8px; border-radius:6px; font-size:12px; opacity:0; transform:translateY(6px); transition: opacity 0.18s ease, transform 0.18s ease; pointer-events:none; white-space:nowrap; }
+        .copy-tooltip.show { opacity:1; transform:translateY(0); }
+
+        .loading { margin-top:20px; font-style:italic; color:#666; display:flex; align-items:center; gap:10px; }
+        .spinner { border:4px solid #f3f3f3; border-top:4px solid #0078ff; border-radius:50%; width:22px; height:22px; animation:spin 1s linear infinite; }
+        @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+
+        /* Save button style */
+        #saveBtn { margin-top:15px; background-color:#28a745; }
+        #saveBtn:hover { background-color:#1e7e34; }
+    </style>
+</head>
+<body>
+    <h1>Upload Audio for Transcription</h1>
+
+    <form id="transcribeForm" enctype="multipart/form-data">
+        <label for="audio_file">Select audio file:</label>
+        <input type="file" id="audio_file" name="audio_file" required><br><br>
+
+        <label for="audio_language">Select Language:</label>
+        <select id="audio_language" name="audio_language">
+            <option value="">Auto-detect</option>
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+            <option value="ru">Russian</option>
+            <option value="hi">Hindi</option>
+            <option value="ar">Arabic</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+            <option value="fa">Persian</option>
+            <option value="tr">Turkish</option>
+            <option value="pl">Polish</option>
+            <option value="uk">Ukrainian</option>
+            <option value="el">Greek</option>
+            <option value="th">Thai</option>
+            <option value="sv">Swedish</option>
+            <option value="id">Indonesian</option>
+        </select><br><br>
+
+        <button type="submit">Transcribe</button>
+    </form>
+
+    <div id="loading" class="loading" style="display:none;">
+        <div class="spinner" aria-hidden="true"></div>
+        <span id="loadingText">⏳ Transcribing... please wait.</span>
+    </div>
+
+    <div class="result-box" id="resultBox" aria-live="polite">
+        <div class="result-header">
+            <h3 style="margin:0">Transcription Result</h3>
+            <div class="copy-tooltip" id="copyTooltip" role="status" aria-hidden="true">Copied!</div>
+        </div>
+
+        <div class="textarea-container">
+            <textarea id="transcriptionText" readonly></textarea>
+            <button class="copy-icon-btn" id="copyBtn" aria-label="Copy transcription">
+                <svg viewBox="0 0 24 24">
+                    <path d="M16 1H8C6.9 1 6 1.9 6 3v1H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-1V3c0-1.1-.9-2-2-2zM8 3h8v1H8V3zm8 18H5V7h11v14z"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Save Button -->
+        <button id="saveBtn" style="display:none;">💾 Save Transcription</button>
+    </div>
+
+    <script>
+        const form = document.getElementById('transcribeForm');
+        const loading = document.getElementById('loading');
+        const resultBox = document.getElementById('resultBox');
+        const transcriptionText = document.getElementById('transcriptionText');
+        const copyBtn = document.getElementById('copyBtn');
+        const copyTooltip = document.getElementById('copyTooltip');
+        const saveBtn = document.getElementById('saveBtn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loading.style.display = "flex";
+            resultBox.style.display = "none";
+            transcriptionText.value = "";
+            saveBtn.style.display = "none";
+
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch("/stt/transcribe", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("Transcription failed.");
+
+                const data = await response.json();
+                transcriptionText.value = data.text || "No transcription returned.";
+                resultBox.style.display = "flex";
+                loading.style.display = "none";
+                saveBtn.style.display = "block";  // show Save button
+                resultBox.scrollIntoView({ behavior: "smooth", block: "center" });
+            } catch (error) {
+                loading.style.display = "none";
+                alert("❌ Error: " + error.message);
+                console.error(error);
+            }
+        });
+
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(transcriptionText.value || "");
+                copyTooltip.classList.add('show');
+                setTimeout(() => copyTooltip.classList.remove('show'), 1400);
+            } catch (err) {
+                console.error('Copy failed', err);
+            }
+        });
+
+        // Save transcription
+        saveBtn.addEventListener('click', async () => {
+            try {
+                const formData = new FormData();
+                formData.append("text", transcriptionText.value);
+
+                const response = await fetch("/stt/save", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert(" " + data.message);
+                } else {
+                    alert("❌ Error: " + (data.error || "Failed to save transcription"));
+                }
+            } catch (err) {
+                console.error('Save failed', err);
+                alert(" Error saving transcription");
+            }
+        });
+    </script>
+</body>
+</html>
